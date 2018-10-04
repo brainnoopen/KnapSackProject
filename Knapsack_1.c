@@ -8,8 +8,17 @@ int* weights; //Array containing weights of all items
 int* values; //Array containing value of all items
 int W; //Capacity of KnapSack
 int** F; //Memory Function
+int data; //record all the data from input
 int main()
 {
+	FILE *in_file  = fopen(argv[1], "r");
+    if (in_file  == NULL)
+    {
+        printf("Can't open file for reading.\n");
+        return -1;
+    }
+    fscanf(in_file,"%d", &data);
+    printf("%d", data);
 	scanf("%d", &n);
 	weights = (int*)malloc((n+1)*sizeof(int));
 	values = (int*)malloc((n+1)*sizeof(int));
