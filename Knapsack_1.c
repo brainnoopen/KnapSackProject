@@ -3,52 +3,41 @@
 #include <time.h>
 int knapsack(int, int); //Returns the required optimal value by creating part of the Memory Function  
 int max(int, int);
-int n;
-int* weights; //Array containing weights of all items
-int* values; //Array containing value of all items
+int n = 5;
+#define num 10000
+#define debug 0
+int weights[num]; //Array containing weights of all items
+int values[num]; //Array containing value of all items
 int W; //Capacity of KnapSack
-int** F; //Memory Function
+int F[num][num]; //Memory Function
 int data; //record all the data from input
 int main(int argc, char** argv)
 {
 
+
 	FILE *fp  = fopen(argv[1], "r");
-    if (fp  == NULL)
-    {
-        printf("Can't open file for reading.\n");
+    if(fp == NULL)
         return -1;
+    int tmpA, tmpB, count = 1;
+    while(fscanf(fp,"%d %d",&tmpA, &tmpB) != EOF){
+        printf("%d, %d\n", tmpA, tmpB);
+        weights[count] = tmpA;
+        values[count++] = tmpB;
     }
-    
-    char line[256];
-    while (fgets(line, sizeof(line), fp)) {
-        /* note that fgets don't strip the terminating \n, checking its
-           presence would allow to handle lines longer that sizeof(line) */
-        printf("%s", line); 
-    }
-    for(int t=1; t<250;t++){
-    	printf("%s", line[t]);
-    }
-    
-    /* may check feof here to make a difference between eof and io failure -- network
-       timeout for instance */
+
+    for(int i = 1; i < count; i++)
+        printf("weights[%d] = %d, values[%d] = %d\n",i,weights[i],i,values[i]);
 
     fclose(fp);
 
-	scanf("%d", &n);
-	weights = (int*)malloc((n+1)*sizeof(int));
-	values = (int*)malloc((n+1)*sizeof(int));
+    scanf("%d", &W);
+
 	int i, j;
-	for(i=1;i<=n;i++)
-		scanf("%d", &weights[i]);
-	for(i=1;i<=n;i++)
-		scanf("%d", &values[i]);
-	scanf("%d", &W);
-	F = (int**)malloc((n+1)*sizeof(int*));
-	for(i=0;i<=n;i++)
-		F[i] = (int*)malloc((W+1)*sizeof(int));
-	for(i=0;i<(W+1);i++)
+	
+
+	for(i=0;i<=W;i++)
 		F[0][i] = 0;
-	for(i=0;i<(n+1);i++)
+	for(i=0;i<=n;i++)
 		F[i][0] = 0;
 	for(i=1;i<=n;i++)
 	{
@@ -56,8 +45,16 @@ int main(int argc, char** argv)
 			F[i][j] = -1;
 	}
 
+	/*if{debug = 1}{
+		for(i=0;i<=n;i++)
+		{
+			for(j=0;j<=W;j++)
+				printf("%d", F[i][j]);
+		printf("\n");
+		}
+	}*/
 
-	int res = knapsack(n, W); //Invoke Memory Function	
+	int result = knapsack(n, W); //Invoke Memory Function	
 	printf("\n\t--------\t");	
 	for(j=1;j<=W;j++)
 	{
@@ -74,12 +71,11 @@ int main(int argc, char** argv)
 		}
 		printf("\n");
 	}
-	
-	printf("Optimal value= %d\n", res);
-	free(weights);
-	free(values);
+	printf("Optimal value= %d\n", result);
 	return 0;
 }
+
+
 int knapsack(int i, int j)
 {
 	int value;
@@ -93,6 +89,7 @@ int knapsack(int i, int j)
 	}
 	return F[i][j];
 }
+
 int max(int a, int b)
 {
 	return (a>b?a:b);
