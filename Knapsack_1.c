@@ -3,14 +3,15 @@
 #include <time.h>
 int knapsack(int, int); //Returns the required optimal value by creating part of the Memory Function  
 int max(int, int);
-int n = 5;
-#define num 10000
-#define debug 0
-int weights[num]; //Array containing weights of all items
-int values[num]; //Array containing value of all items
-int W; //Capacity of KnapSack
-int F[num][num]; //Memory Function
-int data; //record all the data from input
+
+#define n 40
+#define num 200
+
+int weights[n]; //Array containing weights of all items
+int values[n]; //Array containing value of all items
+int W = num; //Capacity of KnapSack
+int F[n+1][num]; //Memory Function
+
 int main(int argc, char** argv)
 {
 
@@ -24,13 +25,14 @@ int main(int argc, char** argv)
         weights[count] = tmpA;
         values[count++] = tmpB;
     }
-
+    
     for(int i = 1; i < count; i++)
         printf("weights[%d] = %d, values[%d] = %d\n",i,weights[i],i,values[i]);
+      
 
     fclose(fp);
 
-    scanf("%d", &W);
+    //scanf("%d", &W);
 
 	int i, j;
 	
@@ -54,7 +56,8 @@ int main(int argc, char** argv)
 		}
 	}*/
 
-	int result = knapsack(n, W); //Invoke Memory Function	
+	int result = knapsack(n, W); //Invoke Memory Function
+	
 	printf("\n\t--------\t");	
 	for(j=1;j<=W;j++)
 	{
