@@ -1,81 +1,109 @@
-
 #include <stdio.h>
 #include <stdlib.h>
-#include <ctype.h>
 #include <string.h>
-#include <math.h>
-#include <memory.h>
+#include <mpi.h>
 #include <time.h>
 #include <sys/times.h>
 #include <sys/time.h>
 
-#define N 10000
-#define CAPACITY_MAX 10000
+#define INCLUDED 0
+#define NOT_INCLUDED 1
+#define max(a,b) (a>b?a:b)
+#define MAIN_PROC 0
+#define N_MAX 1000
 #define VALUE_MAX 100
+#define WEIGHT_MAX 1000
+#define EVAL_TAG 0x20
 
-int n; // number of items
-int knapsack_capacity; // total weight
-int weight[N]; // weight of items
-int value[N]; // values of items
-int knapsack[N+1][CAPACITY_MAX]; 
-int seed;
-
-void inputs(int argc, char *argv[]);
 void outputs();
+void inputs(int argc, char *argv[]);
+
+int numproc, rank;
+int knapsack_capacity, n, seed;
+int *value;
+int *weight;
+int table_cost[N_MAX][WEIGHT_MAX];
+int table_s[N_MAX][WEIGHT_MAX];
+int *map;
+int colPerProc;
+
 
 int main(int argc,char *argv[]) {
-	int i, j;
+	int i, j, k;
+	int cost_with_i, cost_without_i;
+	MPI_Status status;
+	MPI_Request request;
 
-	/* Timing variables */
+	 /* Timing variables */
   	struct timeval etstart, etstop;  /* Elapsed times using gettimeofday() */
 	struct timezone tzdummy;
 	unsigned long long usecstart, usecstop;
 
-	inputs(argc, argv);
 
-	printf("\nStarting clock.\n");
+	MPI_Init(&argc,&argv);
+	MPI_Comm_rank(MPI_COMM_WORLD,&rank);
+	MPI_Comm_size(MPI_COMM_WORLD,&numproc);
+
+	value = malloc(sizeof(int)*N_MAX);
+	weight =(int*)malloc(sizeof(int)*N_MAX);
+	map = (int*)malloc(sizeof(int)*N_MAX);
+	
+	inputs(argc, argv);	
+	MPI_Barrier(MPI_COMM_WORLD);
+
+  	/* Start Clock */
+	if(rank==0) printf("\nStarting clock.\n");
 	gettimeofday(&etstart, &tzdummy);
 
-	for( i=0; i<=n; i++ ){
-		for( j=0; j<knapsack_capacity; j++ ) {
+	//For each item
+	for(i=0;i<n;i++){
+		// Each rank computes its columns
+		for(j=rank; j<knapsack_capacity; j+=numproc){
 
-			if( i==0 || j==0 ){
-				knapsack[i][j]= 0;
+			//Find the best value with the new item
+			if(j - weight[i]<0)
+				cost_with_i=0;
 
-			} else if( weight[i-1] <= j ){
+			else if(i == 0 && j-weight[i] >= 0)
+				cost_with_i=value[i];
 
-				int one = value[i-1] + knapsack[i-1][j-weight[i-1]];
-				int two = knapsack[i-1][j];
+			else{
+				MPI_Recv(&cost_with_i, 1, MPI_INT, map[j-weight[i]], i-1, MPI_COMM_WORLD, &status);
+				cost_with_i+=value[i];
+			}
 
-				if(one > two) {
-					knapsack[i][j] = one;
-				} else {
-					knapsack[i][j] = two;
-				}          
-			} else {
-				knapsack[i][j] = knapsack[i-1][j];
+			//Find the best value without the new item
+			cost_without_i = (i==0) ? 0 : table_cost[i-1][j];
+
+			//Compute T[i][j]
+			table_cost[i][j] = max(cost_with_i, cost_without_i);
+			table_s[i][j] = (table_cost[i][j]==cost_without_i) ? NOT_INCLUDED : INCLUDED;
+
+			//Send to all procs that could need the new value (non blancking)
+			for(k=j+1; k<knapsack_capacity; k++){
+				if(k-j == weight[i+1]){
+					MPI_Isend(&table_cost[i][j], 1, MPI_INT, map[k], i, MPI_COMM_WORLD, &request);
+				}
 			}
 
 		}
-
 	}
 
 
-/* Stop Clock */
+	/* Stop Clock */
 	gettimeofday(&etstop, &tzdummy);
-	printf("Stopped clock.\n");
+	if(rank==0) printf("Stopped clock.\n");
 	usecstart = (unsigned long long)etstart.tv_sec * 1000000 + etstart.tv_usec;
 	usecstop = (unsigned long long)etstop.tv_sec * 1000000 + etstop.tv_usec;
 
+	MPI_Barrier(MPI_COMM_WORLD);
 
 	outputs();
 
-	printf("\nElapsed time = %g ms.\n",
-		(float)(usecstop - usecstart)/(float)1000);
+	/* Display timing results */
+	if(rank==0) printf("\nElapsed time = %g ms.\n", (float)(usecstop - usecstart)/(float)1000);
 
-	
-	
-	
+	MPI_Finalize();
 	return 0;
 }
 
@@ -83,47 +111,86 @@ int main(int argc,char *argv[]) {
 void inputs(int argc, char *argv[]){
 	int i;
 
-	if(argc != 3){
-		printf("Error: knapsack <max capacity weight> <number of items> \n");
+	if(argc != 4){
+		if(rank == MAIN_PROC)
+			printf("Error: knapsack <max capacity weight> <number of items> <seed>\n");
+		MPI_Finalize();
 		exit(0);
 	}
 
 	knapsack_capacity = atoi(argv[1])+1;
 	n  = atoi(argv[2]);
-	//seed = atoi(argv[3]);
+	seed = atoi(argv[3]);
+	
+	if(n>N_MAX){
+		if(rank == MAIN_PROC)
+			printf("Error: max number of items is %d\n", N_MAX);
+		MPI_Finalize();
+		exit(0);
+	}
+	if(knapsack_capacity>WEIGHT_MAX+1){
+		if(rank == MAIN_PROC)
+			printf("Error: capacity maximum is %d\n", WEIGHT_MAX);
+		MPI_Finalize();
+		exit(0);
+	}
 
-	//srandom(seed);
+	srandom(seed);
 
-	//printf("Items :\n");
-
-	for(int i=0;i<n;i++){
+	for(i=0;i<n;i++){
 		value[i]=random()%VALUE_MAX;
 		weight[i]=random()%(knapsack_capacity-1)+1;
-		printf("\tItem %d: value = %d / Weight = %d\n", i, value[i], weight[i]);
+		if(rank == MAIN_PROC)
+			printf("\tItem %d: value = %d / Weight = %d\n", i, value[i], weight[i]);
 	}
+
+
+	for (i = 0; i < knapsack_capacity; i++){
+		map[i] = i%numproc;
+	}
+
 }
 
 void outputs(){
 	int i, j;
+	MPI_Status status;
+	MPI_Request request;
 
-	printf("\n\nResults:\n");
-	printf("\tKnapsack max weight: %d / Number of items: %d\n", knapsack_capacity-1, n);
-	printf("\tBest value: %d \n", knapsack[n][knapsack_capacity-1]);
-	printf("\tItems taken: ");
+	int table_svg[N_MAX][WEIGHT_MAX];
 
-	i = n;
-	j = knapsack_capacity-1;
-	while(i > 0 && j>0){
-		if( knapsack[i][j] == knapsack[i-1][j] ) {
-			i--;
-		} else {
-			printf("%d, ", i-1);
-			j-=weight[i-1];
-			i--;
+	// Assimilate Results and Print them
+	if(rank != map[knapsack_capacity-1]){
+		for(j=rank; j<knapsack_capacity-1; j+=numproc){
+			MPI_Isend(table_s, N_MAX*WEIGHT_MAX, MPI_INT, map[knapsack_capacity-1], EVAL_TAG, MPI_COMM_WORLD, &request);
 		}
+	}else{
+
+		memcpy(table_svg, table_s, N_MAX*WEIGHT_MAX);
+
+		printf("\n\nResults:\n");
+		printf("\tKnapsack max weight: %d / Number of items: %d\n", knapsack_capacity-1, n);
+		printf("\tBest value: %d \n", table_cost[n-1][knapsack_capacity-1]);
+		printf("\tItems taken: ");
+		
+		j=knapsack_capacity-1;
+
+		for(i=n-1; j>0 && i>=0; i--){
+			if(table_s[i][j] == INCLUDED){
+				printf("%d, ",i);
+
+				j-=weight[i];
+				
+				if(j > 0 ){
+					if (map[j]!=rank) {
+						MPI_Recv(table_s, N_MAX*WEIGHT_MAX, MPI_INT, map[j], EVAL_TAG, MPI_COMM_WORLD, &status);
+					} else {
+						memcpy(table_s, table_svg, N_MAX*WEIGHT_MAX);
+					}
+
+				}
+			}
+		}
+		printf("\n\n");
+		
 	}
-
-	printf("\n\n");
-
-
 }
