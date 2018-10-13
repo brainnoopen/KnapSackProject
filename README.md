@@ -1,2 +1,2 @@
 # KnapSackProject
-This is the sequential version of KnapSack
+This includes the sequential and parallel version of KnapSack
