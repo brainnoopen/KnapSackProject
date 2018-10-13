@@ -1,196 +1,181 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include<stdio.h>
 #include <mpi.h>
-#include <time.h>
-#include <sys/times.h>
-#include <sys/time.h>
+#include <stdlib.h>
+#define num 5000
+#define capacaity 18000
+//subblock size
+#define row 64
+#define column 512
+//int K[num+1][capacaity+1];
+#define exta_row 78
+int result[num+1+exta_row][capacaity+1];
 
-#define INCLUDED 0
-#define NOT_INCLUDED 1
-#define max(a,b) (a>b?a:b)
-#define MAIN_PROC 0
-#define N_MAX 1000
-#define VALUE_MAX 100
-#define WEIGHT_MAX 1000
-#define EVAL_TAG 0x20
+int max(int a, int b) { return (a > b)? a : b; }
+int min(int i, int j) {
+        return (i<j) ? i : j;
+}
 
-void outputs();
-void inputs(int argc, char *argv[]);
+//knapSack(n, W, r, wt, val, i, rank, size);
+// r 代表row， r = min(row,n-i);
+// i的值用来判断是否为第一个block，传递给start变量
+// rank是process的序号，rank=0代表主process
+void knapSack(int n, int W, int r, int wt[], int val[], 
+			 int start, int rank, int size)
+{
+   //int i, j;
+   //int K[n+1][W+1];
+   //int exta_row = n / 64;
+   int t = start/64;
+   
+   int recv_rank = (rank-1)%size;   //rank to receive data
+   int send_rank = (rank+1)%size; // rank to send data
+   // deal with first block, r = 64，将problem按照row划分为几个小problem
+   //since it doesn't receive data from any nodes
+   if(start == 0)
+   {	
+   		int i, j; // temp value for loop function
+   		//int result[r][W];
+   		for(j = 0; j < W; j += column)
+   		{
+   		// cols用来决定node纵轴的工作区间,cols一般情况下等于column，为512，
+    	// 最后一次等于 W-j,假如 W = 1200, 最后一次j = 1024, 那么cols = 176
+   			int cols = min(column, W-j);
+   			int k; 
+   			for (k = j; k < j + cols; k++){
+   				//如果item 0 的weight超过k，则为0
+   				//如果没超过k，则为item 0的value值
+   				if(wt[0] > k){
+   					result[0][k] = 0;
+   				}
+   				else{
+   					result[0][k] = val[0];
+   				}
+   			}
+   		//上面计算的就是 i=0的情况,然后i从1到r-1
+   		//compute subbloock
+   			for (i = 1; i < r; i++)
+   			{
+   				for (k = j; k < j + cols; k++) 
+   				{
+   					if( k < wt[i] || result[i-1][k] >= result[i-1][k-wt[i]] + val[i])
+   					{
+   						result[i][k] = result[i-1][k];
+   					}
+   					else
+   					{
+   						result[i][k] = result[i-1][k-wt[i]] + val[i];
+   					}
+   						
+   				}
+   			}
+   			//每计算完一个区间的值，j从0到512，从512到1024，就把最后一行的值发送给下一个node
+   			MPI_Send(&result[65*t-2][j], cols, MPI_INT, send_rank, j, MPI_COMM_WORLD);
+   		}
+   	}
+   	//如果不是第一个block的话
+   	else
+   	{
+   		int i, j; //temp value for loop function
+   		//int result[r+1][W];
+   		for(j = 0; j < W; j += column)
+   		{
+   			int cols = min(column, W-j);
+   			int k;
+        //receive data from last node
+        // use the first row to store the data from last node
+        // e.g 当start = 64时，第二个block的第一行用来存储第一个block的最后一行
+   			MPI_Recv(&result[65*t-1][j],cols,MPI_INT,recv_rank,j,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+        
+        int control_i = min(63,n-1-65*t); 
+        for(i =65*t; i <= 65*t + control_i + exta_row; i++)
+        {
+          for (k = j; k < j + cols; k++)
+          {
+            //第一个block结束是在63行,第二个block的时候从64行开始
+            //int prev_i = 65*t-1; 
+            //例如计算第65行的weight，实际上对应的是wt[64]的数据
+            //计算第130行的weight，实际上对应的是wt[128]的数据
+            int actual_wt_index = 65*t-t; //
+            if(k < wt[actual_wt_index] || result[i-1][k] >= result[i-1][k-wt[actual_wt_index]] + val[actual_wt_index])
+            {
+              result[i][k] = result[i-1][k];
+            }
+            else
+            {
+              result[i][k] = result[i-1][k-wt[i-actual_wt_index]] + val[actual_wt_index];
+            }
+          }
+        }
 
-int numproc, rank;
-int knapsack_capacity, n, seed;
-int *value;
-int *weight;
-int table_cost[N_MAX][WEIGHT_MAX];
-int table_s[N_MAX][WEIGHT_MAX];
-int *map;
-int colPerProc;
-
-
-int main(int argc,char *argv[]) {
-	int i, j, k;
-	int cost_with_i, cost_without_i;
-	MPI_Status status;
-	MPI_Request request;
-
-	 /* Timing variables */
-  	struct timeval etstart, etstop;  /* Elapsed times using gettimeofday() */
-	struct timezone tzdummy;
-	unsigned long long usecstart, usecstop;
-
-
-	MPI_Init(&argc,&argv);
-	MPI_Comm_rank(MPI_COMM_WORLD,&rank);
-	MPI_Comm_size(MPI_COMM_WORLD,&numproc);
-
-	value = malloc(sizeof(int)*N_MAX);
-	weight =(int*)malloc(sizeof(int)*N_MAX);
-	map = (int*)malloc(sizeof(int)*N_MAX);
-	
-	inputs(argc, argv);	
-	MPI_Barrier(MPI_COMM_WORLD);
-
-  	/* Start Clock */
-	if(rank==0) printf("\nStarting clock.\n");
-	gettimeofday(&etstart, &tzdummy);
-
-	//For each item
-	for(i=0;i<n;i++){
-		// Each rank computes its columns
-		for(j=rank; j<knapsack_capacity; j+=numproc){
-
-			//Find the best value with the new item
-			if(j - weight[i]<0)
-				cost_with_i=0;
-
-			else if(i == 0 && j-weight[i] >= 0)
-				cost_with_i=value[i];
-
-			else{
-				MPI_Recv(&cost_with_i, 1, MPI_INT, map[j-weight[i]], i-1, MPI_COMM_WORLD, &status);
-				cost_with_i+=value[i];
-			}
-
-			//Find the best value without the new item
-			cost_without_i = (i==0) ? 0 : table_cost[i-1][j];
-
-			//Compute T[i][j]
-			table_cost[i][j] = max(cost_with_i, cost_without_i);
-			table_s[i][j] = (table_cost[i][j]==cost_without_i) ? NOT_INCLUDED : INCLUDED;
-
-			//Send to all procs that could need the new value (non blancking)
-			for(k=j+1; k<knapsack_capacity; k++){
-				if(k-j == weight[i+1]){
-					MPI_Isend(&table_cost[i][j], 1, MPI_INT, map[k], i, MPI_COMM_WORLD, &request);
-				}
-			}
-
-		}
-	}
-
-
-	/* Stop Clock */
-	gettimeofday(&etstop, &tzdummy);
-	if(rank==0) printf("Stopped clock.\n");
-	usecstart = (unsigned long long)etstart.tv_sec * 1000000 + etstart.tv_usec;
-	usecstop = (unsigned long long)etstop.tv_sec * 1000000 + etstop.tv_usec;
-
-	MPI_Barrier(MPI_COMM_WORLD);
-
-	outputs();
-
-	/* Display timing results */
-	if(rank==0) printf("\nElapsed time = %g ms.\n", (float)(usecstop - usecstart)/(float)1000);
-
-	MPI_Finalize();
-	return 0;
+        if (start + r == n + exta_row && j+cols == W)
+        {
+          printf("max profit: %d \n", result[n + exta_row-1][W-1]);
+        }
+      else if ((start + r) != (n + exta_row))
+        {
+          MPI_Send(&result[65*t-2][j], cols, MPI_INT, send_rank, j, MPI_COMM_WORLD);
+        }
+   		}
+      
+   	}
 }
 
 
-void inputs(int argc, char *argv[]){
-	int i;
+ 
 
-	if(argc != 4){
-		if(rank == MAIN_PROC)
-			printf("Error: knapsack <max capacity weight> <number of items> <seed>\n");
-		MPI_Finalize();
-		exit(0);
-	}
+int main(int argc, char** argv)
+{
+    int n,W;
+    int i;// 用来判断处理哪个block
+    int val[num], wt[num];
+    n = num;
+    printf("number of items: %d\n", n);
 
-	knapsack_capacity = atoi(argv[1])+1;
-	n  = atoi(argv[2]);
-	seed = atoi(argv[3]);
-	
-	if(n>N_MAX){
-		if(rank == MAIN_PROC)
-			printf("Error: max number of items is %d\n", N_MAX);
-		MPI_Finalize();
-		exit(0);
-	}
-	if(knapsack_capacity>WEIGHT_MAX+1){
-		if(rank == MAIN_PROC)
-			printf("Error: capacity maximum is %d\n", WEIGHT_MAX);
-		MPI_Finalize();
-		exit(0);
-	}
+    W = capacaity;
+    printf("capacaity of knapSack: %d\n", W);
 
-	srandom(seed);
+    // read data from input
+    FILE *fp  = fopen(argv[1], "r");
+    if(fp == NULL)
+        return -1;
+    int tmpA, tmpB, count = 0;
+    while(fscanf(fp,"%d %d",&tmpA, &tmpB) != EOF){
+        //printf("%d, %d\n", tmpA, tmpB);
+        wt[count] = tmpA;
+        val[count++] = tmpB;
+    }
+    fclose(fp);
+    //end read data
 
-	for(i=0;i<n;i++){
-		value[i]=random()%VALUE_MAX;
-		weight[i]=random()%(knapsack_capacity-1)+1;
-		if(rank == MAIN_PROC)
-			printf("\tItem %d: value = %d / Weight = %d\n", i, value[i], weight[i]);
-	}
+    // begin the MPI part
+    int size,rank;
+    MPI_Init(NULL, NULL);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
+    //int exta_row = n / 64;
+    for (i = 0; i < n + exta_row; i += row) {
+    	// r用来决定node的工作区间,r一半情况下等于row，为64，
+    	// 最后一次等于 n-i,假如 n = 200, 最后一次i = 192, 那么r=8
+    	int r = min(row,n+exta_row-i);
+    	// 如果i = 64, i/row=64/64=1 ,1%4 = 1
+    	// size为process的数量
+    	if((i/row) % size == rank)
+    		knapSack(n, W, r, wt, val, i, rank, size); //第一次循环i=0
+    }
 
-	for (i = 0; i < knapsack_capacity; i++){
-		map[i] = i%numproc;
-	}
+    MPI_Finalize();
+    
 
+    
+    /*
+    for(int i = 0; i < count; i++)
+        printf("weights[%d] = %d, values[%d] = %d\n",i,wt[i],i,val[i]);
+    */
+    
+    //printf("the optimal value is %d\n", knapSack(W, wt, val, n));
+    return 0;
 }
 
-void outputs(){
-	int i, j;
-	MPI_Status status;
-	MPI_Request request;
 
-	int table_svg[N_MAX][WEIGHT_MAX];
 
-	// Assimilate Results and Print them
-	if(rank != map[knapsack_capacity-1]){
-		for(j=rank; j<knapsack_capacity-1; j+=numproc){
-			MPI_Isend(table_s, N_MAX*WEIGHT_MAX, MPI_INT, map[knapsack_capacity-1], EVAL_TAG, MPI_COMM_WORLD, &request);
-		}
-	}else{
-
-		memcpy(table_svg, table_s, N_MAX*WEIGHT_MAX);
-
-		printf("\n\nResults:\n");
-		printf("\tKnapsack max weight: %d / Number of items: %d\n", knapsack_capacity-1, n);
-		printf("\tBest value: %d \n", table_cost[n-1][knapsack_capacity-1]);
-		printf("\tItems taken: ");
-		
-		j=knapsack_capacity-1;
-
-		for(i=n-1; j>0 && i>=0; i--){
-			if(table_s[i][j] == INCLUDED){
-				printf("%d, ",i);
-
-				j-=weight[i];
-				
-				if(j > 0 ){
-					if (map[j]!=rank) {
-						MPI_Recv(table_s, N_MAX*WEIGHT_MAX, MPI_INT, map[j], EVAL_TAG, MPI_COMM_WORLD, &status);
-					} else {
-						memcpy(table_s, table_svg, N_MAX*WEIGHT_MAX);
-					}
-
-				}
-			}
-		}
-		printf("\n\n");
-		
-	}
-}
