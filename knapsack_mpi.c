@@ -1,13 +1,13 @@
 #include<stdio.h>
 #include <mpi.h>
 #include <stdlib.h>
-#define num 5000
-#define capacaity 18000
+#define num 135
+#define capacaity 5
 //subblock size
 #define row 64
 #define column 512
 //int K[num+1][capacaity+1];
-#define exta_row 78
+#define exta_row 2
 int result[num+1+exta_row][capacaity+1];
 
 int max(int a, int b) { return (a > b)? a : b; }
@@ -27,12 +27,15 @@ void knapSack(int n, int W, int r, int wt[], int val[],
    //int exta_row = n / 64;
    int t = start/64;
    
-   int recv_rank = (rank-1)%size;   //rank to receive data
+   int recv_rank = (rank-1)%size; //rank to receive data
+   printf("flag4 the receiver rank is %d\n", recv_rank);
    int send_rank = (rank+1)%size; // rank to send data
+   printf("flag5 the sender rank is %d\n\n", send_rank);
    // deal with first block, r = 64，将problem按照row划分为几个小problem
    //since it doesn't receive data from any nodes
    if(start == 0)
    {	
+      printf("the rank of processor is %d\n\n", rank);
    		int i, j; // temp value for loop function
    		//int result[r][W];
    		for(j = 0; j < W; j += column)
@@ -69,12 +72,24 @@ void knapSack(int n, int W, int r, int wt[], int val[],
    				}
    			}
    			//每计算完一个区间的值，j从0到512，从512到1024，就把最后一行的值发送给下一个node
-   			MPI_Send(&result[65*t-2][j], cols, MPI_INT, send_rank, j, MPI_COMM_WORLD);
+   			MPI_Send(&result[63][j], cols, MPI_INT, send_rank, j, MPI_COMM_WORLD);
+        printf("here is flag1\n\n");
+        //printf("last node the result is %d\n", result[63][1]);
+        //printf("last node the result is %d\n", result[63][2]);
+        /*
+        if (start + r == n + exta_row && j+cols == W)
+        {
+          printf("max profit: %d \n", result[n + exta_row-1][W-1]);
+        }*/
+
    		}
+
+
    	}
    	//如果不是第一个block的话
    	else
    	{
+      printf("the rank of processor is %d\n", rank);
    		int i, j; //temp value for loop function
    		//int result[r+1][W];
    		for(j = 0; j < W; j += column)
@@ -84,10 +99,21 @@ void knapSack(int n, int W, int r, int wt[], int val[],
         //receive data from last node
         // use the first row to store the data from last node
         // e.g 当start = 64时，第二个block的第一行用来存储第一个block的最后一行
+        //printf("from last node the result is %d\n", result[64][1]);
+        //printf("from last node the result is %d\n", result[64][2]);
    			MPI_Recv(&result[65*t-1][j],cols,MPI_INT,recv_rank,j,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-        
+        printf("here is flag2\n\n");
+        //printf("from last node the result1 is %d\n", result[128][1]);
+        //printf("from last node the result2 is %d\n", result[128][2]);
+
+        int temp;
         int control_i = min(63,n-1-65*t); 
-        for(i =65*t; i <= 65*t + control_i + exta_row; i++)
+        if(control_i + exta_row > 63){temp = 63;}
+        else temp = control_i + exta_row;
+
+        printf("temp is %d\n", temp);
+
+        for(i =65*t; i <= 65*t + temp; i++)
         {
           for (k = j; k < j + cols; k++)
           {
@@ -99,6 +125,7 @@ void knapSack(int n, int W, int r, int wt[], int val[],
             if(k < wt[actual_wt_index] || result[i-1][k] >= result[i-1][k-wt[actual_wt_index]] + val[actual_wt_index])
             {
               result[i][k] = result[i-1][k];
+              //printf("%d\n", result[i][k]);
             }
             else
             {
@@ -110,10 +137,12 @@ void knapSack(int n, int W, int r, int wt[], int val[],
         if (start + r == n + exta_row && j+cols == W)
         {
           printf("max profit: %d \n", result[n + exta_row-1][W-1]);
+          printf("the last index of element is and max weight is %d %d\n", n + exta_row-1, W-1);
         }
       else if ((start + r) != (n + exta_row))
         {
           MPI_Send(&result[65*t-2][j], cols, MPI_INT, send_rank, j, MPI_COMM_WORLD);
+          printf("here is flag3\n\n");
         }
    		}
       
@@ -127,7 +156,7 @@ int main(int argc, char** argv)
 {
     int n,W;
     int i;// 用来判断处理哪个block
-    int val[num], wt[num];
+    int val[num], wt[capacaity];
     n = num;
     printf("number of items: %d\n", n);
 
@@ -158,10 +187,16 @@ int main(int argc, char** argv)
     	// r用来决定node的工作区间,r一半情况下等于row，为64，
     	// 最后一次等于 n-i,假如 n = 200, 最后一次i = 192, 那么r=8
     	int r = min(row,n+exta_row-i);
+      printf("r is %d\n", r);
+      printf("at the beginning, the rank is %d\n\n", rank);
     	// 如果i = 64, i/row=64/64=1 ,1%4 = 1
     	// size为process的数量
     	if((i/row) % size == rank)
     		knapSack(n, W, r, wt, val, i, rank, size); //第一次循环i=0
+    }
+
+    if (rank == 0){
+      fprintf(stdout,"%d * %d in %d nodes Solver finished in seconds.\n", n, W, size);
     }
 
     MPI_Finalize();
